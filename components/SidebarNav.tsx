@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Gauge, DollarSign, Wallet, FileText, Landmark, BarChart3, ChevronRight } from "lucide-react";
+import { Gauge, DollarSign, FileText, BarChart3, ChevronRight } from "lucide-react";
 
 export default function SidebarNav() {
   const pathname = usePathname();
