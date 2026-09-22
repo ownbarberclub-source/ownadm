@@ -455,7 +455,7 @@ export default function ContasClient({
             <span className="text-xs font-rajdhani uppercase font-semibold text-gray-400">Status:</span>
             <select
               value={filtroStatus}
-              onChange={(e) => setFiltroStatus(e.target.value as any)}
+              onChange={(e) => setFiltroStatus(e.target.value as "TODOS" | "PENDENTE" | "ATRASADA" | "PAGA")}
               className="bg-[#181818] border border-[#333] text-white text-xs font-rajdhani font-semibold uppercase px-3 py-2 rounded-sm focus:outline-none focus:border-[#E51E25] cursor-pointer"
             >
               <option value="TODOS">Todos os Status</option>

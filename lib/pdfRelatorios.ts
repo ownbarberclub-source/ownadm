@@ -1,5 +1,5 @@
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import autoTable, { RowInput } from "jspdf-autotable";
 
 export const formatarBRL = (valor: number): string => {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valor || 0);
@@ -366,7 +366,7 @@ export function gerarPdfDre(dados: DrePdfData) {
   autoTable(doc, {
     startY: 32,
     head: [["Linha de Demonstração Gerencial", "Valor Apurado (R$)"]],
-    body: rows as any,
+    body: rows as RowInput[],
     theme: "plain",
     headStyles: {
       fillColor: [18, 20, 24],
