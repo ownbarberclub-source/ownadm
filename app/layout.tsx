@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Rajdhani } from "next/font/google";
 import "./globals.css";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { buscarUnidades } from "@/lib/supabaseData";
 import Image from "next/image";
 import UnidadeSelector from "@/components/UnidadeSelector";
 import SidebarNav from "@/components/SidebarNav";
@@ -23,7 +23,7 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const unidadeCookie = cookieStore.get("unidade_id")?.value || "GLOBAL";
-  const unidades = await prisma.unidade.findMany();
+  const unidades = await buscarUnidades();
 
   return (
     <html lang="pt-BR" className={`${inter.variable} ${rajdhani.variable} dark`}>

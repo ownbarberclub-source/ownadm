@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { buscarUnidades, buscarFechamentos } from "@/lib/supabaseData";
 import { cookies } from "next/headers";
 import FaturamentoClient from "./FaturamentoClient";
 
@@ -6,16 +6,10 @@ export default async function FaturamentoPage() {
   const cookieStore = await cookies();
   const unidadeCookieId = cookieStore.get("unidade_id")?.value || "GLOBAL";
 
-  const unidades = await prisma.unidade.findMany({
-    orderBy: { nome: "asc" },
-  });
-
-  const fechamentos = await prisma.fechamentoFaturamento.findMany({
-    include: {
-      unidade: true,
-    },
-    orderBy: { data: "desc" },
-  });
+  const [unidades, fechamentos] = await Promise.all([
+    buscarUnidades(),
+    buscarFechamentos(),
+  ]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

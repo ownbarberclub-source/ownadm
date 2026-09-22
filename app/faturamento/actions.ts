@@ -1,7 +1,9 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
+import { supabaseAdmin, supabase } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
+
+const db = supabaseAdmin || supabase;
 
 export interface FaturamentoInput {
   id?: string;
@@ -25,9 +27,8 @@ export async function salvarFaturamento(input: FaturamentoInput) {
       return { success: false, error: "A data do faturamento é obrigatória." };
     }
 
-    // Normalizar data para UTC meia-noite
     const [ano, mes, dia] = input.data.split("-").map(Number);
-    const dataObj = new Date(Date.UTC(ano, mes - 1, dia, 12, 0, 0));
+    const dataIso = new Date(Date.UTC(ano, mes - 1, dia, 12, 0, 0)).toISOString();
 
     const pix = Math.max(0, Number(input.valorPix) || 0);
     const credito = Math.max(0, Number(input.valorCredito) || 0);
@@ -37,72 +38,41 @@ export async function salvarFaturamento(input: FaturamentoInput) {
 
     const faturamentoTotal = pix + credito + debito + dinheiro + assinatura;
 
-    // Verificar se já existe lançamento para a mesma unidade na mesma data
-    // Buscar no intervalo do dia para garantir em caso de timezone
-    const inicioDia = new Date(Date.UTC(ano, mes - 1, dia, 0, 0, 0));
-    const fimDia = new Date(Date.UTC(ano, mes - 1, dia, 23, 59, 59, 999));
+    const payload = {
+      data: dataIso,
+      unidadeId: input.unidadeId,
+      valorPix: pix,
+      valorCredito: credito,
+      valorDebito: debito,
+      valorDinheiro: dinheiro,
+      valorAssinaturas: assinatura,
+      faturamentoBruto: faturamentoTotal,
+      faturamentoLiquido: faturamentoTotal,
+      totalMeiosPagamento: faturamentoTotal,
+      observacoes: input.observacoes?.trim() || null,
+      status: "FECHADO",
+      responsavel: "Administrador",
+      updatedAt: new Date().toISOString(),
+    };
 
-    const existente = await prisma.fechamentoFaturamento.findFirst({
-      where: {
-        unidadeId: input.unidadeId,
-        data: {
-          gte: inicioDia,
-          lte: fimDia,
-        },
-      },
-    });
-
-    // Se já existe e não estamos editando o próprio registro
-    if (existente && (!input.id || existente.id !== input.id)) {
-      return {
-        success: false,
-        error: "Já existe um lançamento para esta unidade nesta data. Edite o registro existente.",
-        existenteId: existente.id,
-      };
+    let res;
+    if (input.id) {
+      res = await db
+        .from("adm_faturamento_diario")
+        .update(payload)
+        .eq("id", input.id)
+        .select()
+        .single();
+    } else {
+      res = await db
+        .from("adm_faturamento_diario")
+        .upsert(payload, { onConflict: "unidadeId,data" })
+        .select()
+        .single();
     }
 
-    let resultado;
-    const targetId = input.id || existente?.id;
-
-    if (targetId) {
-      // Atualizar registro existente
-      resultado = await prisma.fechamentoFaturamento.update({
-        where: { id: targetId },
-        data: {
-          data: dataObj,
-          unidadeId: input.unidadeId,
-          valorPix: pix,
-          valorCredito: credito,
-          valorDebito: debito,
-          valorDinheiro: dinheiro,
-          valorAssinaturas: assinatura,
-          faturamentoBruto: faturamentoTotal,
-          faturamentoLiquido: faturamentoTotal,
-          totalMeiosPagamento: faturamentoTotal,
-          observacoes: input.observacoes?.trim() || null,
-          status: "FECHADO",
-          responsavel: "Administrador",
-        },
-      });
-    } else {
-      // Criar novo registro
-      resultado = await prisma.fechamentoFaturamento.create({
-        data: {
-          data: dataObj,
-          unidadeId: input.unidadeId,
-          valorPix: pix,
-          valorCredito: credito,
-          valorDebito: debito,
-          valorDinheiro: dinheiro,
-          valorAssinaturas: assinatura,
-          faturamentoBruto: faturamentoTotal,
-          faturamentoLiquido: faturamentoTotal,
-          totalMeiosPagamento: faturamentoTotal,
-          observacoes: input.observacoes?.trim() || null,
-          status: "FECHADO",
-          responsavel: "Administrador",
-        },
-      });
+    if (res.error) {
+      throw new Error(res.error.message);
     }
 
     try {
@@ -110,10 +80,10 @@ export async function salvarFaturamento(input: FaturamentoInput) {
       revalidatePath("/dashboard");
       revalidatePath("/relatorios/dre");
     } catch {
-      // Ignora erro de contexto fora de requisição Next.js
+      // Ignora fora de contexto Next
     }
 
-    return { success: true, data: resultado };
+    return { success: true, data: res.data };
   } catch (error) {
     console.error("Erro ao salvar faturamento:", error);
     return {
@@ -127,16 +97,21 @@ export async function excluirFaturamento(id: string) {
   try {
     if (!id) return { success: false, error: "ID inválido." };
 
-    await prisma.fechamentoFaturamento.delete({
-      where: { id },
-    });
+    const { error } = await db
+      .from("adm_faturamento_diario")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      throw new Error(error.message);
+    }
 
     try {
       revalidatePath("/faturamento");
       revalidatePath("/dashboard");
       revalidatePath("/relatorios/dre");
     } catch {
-      // Ignora erro de contexto fora de requisição Next.js
+      // Ignora fora de contexto Next
     }
 
     return { success: true };

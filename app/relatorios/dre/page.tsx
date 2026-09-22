@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { buscarUnidades, buscarFechamentos, buscarContasPagar } from "@/lib/supabaseData";
 import { cookies } from "next/headers";
 import DreClient from "./DreClient";
 
@@ -6,19 +6,11 @@ export default async function DrePage() {
   const cookieStore = await cookies();
   const unidadeCookieId = cookieStore.get("unidade_id")?.value || "GLOBAL";
 
-  const unidades = await prisma.unidade.findMany({
-    orderBy: { nome: "asc" },
-  });
-
-  const fechamentos = await prisma.fechamentoFaturamento.findMany({
-    include: { unidade: true },
-    orderBy: { data: "desc" },
-  });
-
-  const contas = await prisma.contaPagar.findMany({
-    include: { unidade: true },
-    orderBy: { dataVencimento: "asc" },
-  });
+  const [unidades, fechamentos, contas] = await Promise.all([
+    buscarUnidades(),
+    buscarFechamentos(),
+    buscarContasPagar(),
+  ]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

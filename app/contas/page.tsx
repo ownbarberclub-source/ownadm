@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { buscarUnidades, buscarContasPagar } from "@/lib/supabaseData";
 import { cookies } from "next/headers";
 import ContasClient from "./ContasClient";
 
@@ -6,16 +6,10 @@ export default async function ContasPage() {
   const cookieStore = await cookies();
   const unidadeCookieId = cookieStore.get("unidade_id")?.value || "GLOBAL";
 
-  const unidades = await prisma.unidade.findMany({
-    orderBy: { nome: "asc" },
-  });
-
-  const contas = await prisma.contaPagar.findMany({
-    include: {
-      unidade: true,
-    },
-    orderBy: { dataVencimento: "asc" },
-  });
+  const [unidades, contas] = await Promise.all([
+    buscarUnidades(),
+    buscarContasPagar(),
+  ]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
