@@ -1,0 +1,359 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+}
+
+model Unidade {
+  id        String   @id @default(cuid())
+  nome      String   // "Own Barber Club Efapi", "Own Barber Club Avenida", "Own Barber Club Centro"
+  createdAt DateTime @default(now())
+
+  // Histórico preservado (não remover)
+  funcionarios Funcionario[]
+  receitas     LancamentoReceita[]
+  contas       ContaPagar[]
+
+  // Nova arquitetura financeira
+  fechamentosFaturamento FechamentoFaturamento[]
+  contasFinanceiras      ContaFinanceira[]
+  movimentacoes          MovimentacaoFinanceira[]
+  fechamentosCaixa       FechamentoCaixa[]
+  transferenciasOrigem   TransferenciaUnidade[] @relation("TransferenciaOrigem")
+  transferenciasDestino  TransferenciaUnidade[] @relation("TransferenciaDestino")
+  importacoesExtrato     ImportacaoExtrato[]
+}
+
+// -------------------------------------------------------------
+// HISTÓRICO PRESERVADO (NÃO UTILIZADO DIRETAMENTE NA NOVA UI)
+// -------------------------------------------------------------
+
+model Funcionario {
+  id                 String   @id @default(cuid())
+  nome               String
+  telefone           String?
+  foto               String?
+  comissaoAvulsa     Float
+  comissaoAssinatura Float
+  ativo              Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  
+  unidadeId          String
+  unidade            Unidade  @relation(fields: [unidadeId], references: [id])
+  receitas           LancamentoReceita[]
+}
+
+model LancamentoReceita {
+  id                 String   @id @default(cuid())
+  tipo               String   // "AVULSO" ou "ASSINATURA"
+  valorComissao      Float
+  faturamentoCadeira Float
+  formaPagamento     String   // "PIX", "DINHEIRO", "DEBITO", "CREDITO"
+  data               DateTime
+  observacao         String?
+  
+  funcionarioId      String
+  funcionario        Funcionario @relation(fields: [funcionarioId], references: [id])
+  
+  unidadeId          String
+  unidade            Unidade  @relation(fields: [unidadeId], references: [id])
+}
+
+// -------------------------------------------------------------
+// CONTAS A PAGAR (INTEGRADO AO SISTEMA)
+// -------------------------------------------------------------
+
+model ContaPagar {
+  id             String    @id @default(cuid())
+  nome           String
+  valor          Float
+  dataVencimento DateTime
+  dataPagamento  DateTime?
+  tipoDespesa    String    @default("FIXO") // "COMISSAO", "FIXO", "VARIAVEL"
+  categoria      String
+  descricao      String?
+  mesReferencia  String    @default("") // Formato "YYYY-MM", ex: "2026-09"
+  status         String    @default("PENDENTE") // "PENDENTE", "PAGA", "ATRASADA"
+  observacao     String?
+  
+  unidadeId      String
+  unidade        Unidade   @relation(fields: [unidadeId], references: [id])
+}
+
+// -------------------------------------------------------------
+// FATURAMENTO DIÁRIO REAL POR UNIDADE
+// -------------------------------------------------------------
+
+model FechamentoFaturamento {
+  id                     String   @id @default(cuid())
+  data                   DateTime
+  unidadeId              String
+  unidade                Unidade  @relation(fields: [unidadeId], references: [id])
+
+  // Categorias de Receita Bruta (mantidas para compatibilidade retroativa)
+  valorAssinaturas       Float    @default(0)
+  valorAvulsos           Float    @default(0)
+  valorExtras            Float    @default(0)
+  valorProdutos          Float    @default(0)
+  valorBebidas           Float    @default(0)
+  valorOutrasReceitas    Float    @default(0)
+
+  // Deduções
+  valorDescontos         Float    @default(0)
+  valorEstornos          Float    @default(0)
+
+  // Faturamentos Calculados
+  faturamentoBruto       Float
+  faturamentoLiquido     Float
+
+  // Meios de Pagamento Recebidos
+  valorDinheiro          Float    @default(0)
+  valorPix               Float    @default(0)
+  valorDebito            Float    @default(0)
+  valorCredito           Float    @default(0)
+  valorOutros            Float    @default(0)
+  totalMeiosPagamento    Float    @default(0)
+
+  // Conferência e Divergência
+  diferencaPagamento     Float    @default(0) // faturamentoLiquido - totalMeiosPagamento
+  justificativaDiferenca String?
+
+  // Controle e Auditoria
+  status                 String   @default("FECHADO") // "RASCUNHO", "CONFERIDO", "FECHADO"
+  responsavel            String   @default("Administrador")
+  observacoes            String?
+  integradoAoCaixa       Boolean  @default(false)
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  historico              HistoricoFechamento[]
+  movimentacoes          MovimentacaoFinanceira[]
+
+  @@unique([unidadeId, data])
+}
+
+model HistoricoFechamento {
+  id             String               @id @default(cuid())
+  fechamentoId   String
+  fechamento     FechamentoFaturamento @relation(fields: [fechamentoId], references: [id], onDelete: Cascade)
+  dataAlteracao  DateTime             @default(now())
+  usuario        String
+  campoAlterado  String
+  valorAnterior  String
+  valorNovo      String
+  justificativa  String
+}
+
+// -------------------------------------------------------------
+// CONTAS FINANCEIRAS POR UNIDADE
+// -------------------------------------------------------------
+
+model ContaFinanceira {
+  id                  String   @id @default(cuid())
+  nome                String   // "Caixa Dinheiro Efapi", "Itaú Efapi", "Cartões a Compensar Efapi"
+  tipo                String   // "DINHEIRO", "BANCARIA", "PIX", "CARTOES_RECEBER", "OUTROS"
+  saldoInicial        Float    @default(0)
+  saldoAtual          Float    @default(0)
+  ativo               Boolean  @default(true)
+  unidadeId           String
+  unidade             Unidade  @relation(fields: [unidadeId], references: [id])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  movimentacoes       MovimentacaoFinanceira[]
+  transferenciasOrigem TransferenciaUnidade[] @relation("ContaTransferenciaOrigem")
+  transferenciasDestino TransferenciaUnidade[] @relation("ContaTransferenciaDestino")
+  importacoesExtrato  ImportacaoExtrato[]
+}
+
+// -------------------------------------------------------------
+// MOVIMENTAÇÕES FINANCEIRAS (ENTRADAS E SAÍDAS)
+// -------------------------------------------------------------
+
+model MovimentacaoFinanceira {
+  id                   String                 @id @default(cuid())
+  codigoIdentificador  String?                // Código da transação ou vínculo de transferência
+  dataCompetencia      DateTime
+  dataMovimento        DateTime               // Data efetiva de recebimento ou pagamento
+  unidadeId            String
+  unidade              Unidade                @relation(fields: [unidadeId], references: [id])
+  contaId              String
+  conta                ContaFinanceira        @relation(fields: [contaId], references: [id])
+
+  tipo                 String                 // "ENTRADA" ou "SAIDA"
+  categoria            String                 // "FATURAMENTO_DIARIO", "RECEBIMENTO_CARTAO", "FORNECEDORES", "ALUGUEL", "FOLHA_PAGAMENTO", "TRANSFERENCIA_SAIDA", "TRANSFERENCIA_ENTRADA", etc.
+  subcategoria         String?
+  descricao            String
+  valor                Float
+  formaPagamento       String                 // "DINHEIRO", "PIX", "DEBITO", "CREDITO", "BOLETO", "TRANSFERENCIA", "OUTROS"
+  status               String                 @default("CONFIRMADO") // "PENDENTE", "CONFIRMADO", "CANCELADO"
+  
+  favorecido           String?                // Fornecedor, cliente ou colaborador
+  anexoUrl             String?
+  observacoes          String?
+  responsavel          String
+  conciliado           Boolean                @default(false)
+  conciliadoEm         DateTime?
+
+  // Vínculos
+  fechamentoId         String?
+  fechamento           FechamentoFaturamento? @relation(fields: [fechamentoId], references: [id])
+  transferenciaId      String?
+  transferencia        TransferenciaUnidade?  @relation(fields: [transferenciaId], references: [id])
+  linhaExtratoId       String?
+
+  // Auditoria (Sem exclusão definitiva)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  canceladoEm          DateTime?
+  canceladoPor         String?
+  motivoCancelamento   String?
+}
+
+// -------------------------------------------------------------
+// TRANSFERÊNCIAS ENTRE UNIDADES
+// -------------------------------------------------------------
+
+model TransferenciaUnidade {
+  id                  String                 @id @default(cuid())
+  codigoIdentificador String                 @unique // Ex: TRF-2026-0001
+  data                DateTime
+  valor               Float
+  descricao           String
+  comprovanteUrl      String?
+  responsavel         String
+  status              String                 @default("CONFIRMADO") // "CONFIRMADO", "CANCELADO"
+
+  unidadeOrigemId     String
+  unidadeOrigem       Unidade                @relation("TransferenciaOrigem", fields: [unidadeOrigemId], references: [id])
+  contaOrigemId       String
+  contaOrigem         ContaFinanceira        @relation("ContaTransferenciaOrigem", fields: [contaOrigemId], references: [id])
+
+  unidadeDestinoId    String
+  unidadeDestino      Unidade                @relation("TransferenciaDestino", fields: [unidadeDestinoId], references: [id])
+  contaDestinoId      String
+  contaDestino        ContaFinanceira        @relation("ContaTransferenciaDestino", fields: [contaDestinoId], references: [id])
+
+  createdAt           DateTime               @default(now())
+  canceladoEm         DateTime?
+  canceladoPor        String?
+  motivoCancelamento  String?
+
+  movimentacoes       MovimentacaoFinanceira[]
+}
+
+// -------------------------------------------------------------
+// CONCILIAÇÃO E FECHAMENTO DIÁRIO DE CAIXA FÍSICO
+// -------------------------------------------------------------
+
+model FechamentoCaixa {
+  id                     String   @id @default(cuid())
+  data                   DateTime
+  unidadeId              String
+  unidade                Unidade  @relation(fields: [unidadeId], references: [id])
+
+  saldoEsperadoDinheiro  Float
+  saldoContadoDinheiro   Float
+  diferencaDinheiro      Float    // sobra (+) ou falta (-)
+  saldoBancarioInformado Float?
+  justificativa          String?
+  observacoes            String?
+  responsavel            String
+  status                 String   @default("FECHADO")
+  createdAt              DateTime @default(now())
+}
+
+// -------------------------------------------------------------
+// EXTRATOS BANCÁRIOS E REGRAS DE CONCILIAÇÃO
+// -------------------------------------------------------------
+
+model ImportacaoExtrato {
+  id              String         @id @default(cuid())
+  arquivoNome     String
+  arquivoHash     String
+  formato         String         // "OFX", "CSV", "XLSX"
+  banco           String?
+  periodoInicio   DateTime?
+  periodoFim      DateTime?
+  saldoInicial    Float?
+  saldoFinal      Float?
+  
+  unidadeId       String
+  unidade         Unidade        @relation(fields: [unidadeId], references: [id])
+  contaId         String
+  conta           ContaFinanceira @relation(fields: [contaId], references: [id])
+
+  totalTransacoes Int            @default(0)
+  totalCreditos   Float          @default(0)
+  totalDebitos    Float          @default(0)
+  status          String         @default("PENDENTE_REVISAO") // "PENDENTE_REVISAO", "CONCILIADO", "CANCELADO"
+
+  responsavel     String
+  createdAt       DateTime       @default(now())
+
+  linhas          LinhaExtrato[]
+}
+
+model LinhaExtrato {
+  id                 String            @id @default(cuid())
+  importacaoId       String
+  importacao         ImportacaoExtrato @relation(fields: [importacaoId], references: [id], onDelete: Cascade)
+  
+  fitid              String?           // Identificador bancário único (OFX)
+  hashLinha          String            // Hash para prevenção de duplicidade
+  data               DateTime
+  descricaoOriginal  String
+  documento          String?
+  valor              Float             // Negativo = Débito, Positivo = Crédito
+  tipo               String            // "DEBITO" ou "CREDITO"
+  
+  categoriaSugerida  String?
+  confiancaSugestao  Float?            // 0.0 a 1.0
+  categoriaConfirmada String?
+  favorecidoConfirmado String?
+  observacoes        String?
+  
+  status             String            @default("PENDENTE") // "PENDENTE", "CONCILIADO", "IGNORADO", "DUPLICADO"
+  justificativaIgnorado String?
+  movimentacaoId     String?
+
+  createdAt          DateTime          @default(now())
+}
+
+model RegraClassificacaoBancaria {
+  id              String   @id @default(cuid())
+  padraoTexto     String   // ex: "ENEL", "COPEL", "LAVANDERIA"
+  campoAlvo       String   @default("DESCRICAO") // "DESCRICAO", "FAVORECIDO"
+  tipoMovimento   String   // "ENTRADA", "SAIDA"
+  categoria       String
+  favorecidoPadrao String?
+  vezesAplicada   Int      @default(0)
+  ativo           Boolean  @default(true)
+  criadoPor       String
+  createdAt       DateTime @default(now())
+}
+
+// -------------------------------------------------------------
+// FILTROS SALVOS PARA RELATÓRIOS
+// -------------------------------------------------------------
+
+model FiltroSalvo {
+  id             String   @id @default(cuid())
+  nome           String
+  modulo         String   // "CAIXA", "FATURAMENTO", "EXTRATOS", "CONTAS"
+  parametrosJson String   // JSON com todos os filtros
+  usuario        String
+  createdAt      DateTime @default(now())
+}
