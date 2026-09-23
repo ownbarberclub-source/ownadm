@@ -38,6 +38,13 @@ export interface FechamentoAdm {
   updatedAt?: string | Date;
 }
 
+export interface RecorrenciaInfo {
+  recorrenciaId: string;
+  tipo: "CONTINUO" | "PARCELADO";
+  parcelaAtual?: number;
+  totalParcelas?: number;
+}
+
 export interface ContaPagarAdm {
   id: string;
   nome: string;
@@ -53,6 +60,72 @@ export interface ContaPagarAdm {
   unidadeId: string;
   unidade: UnidadeAdm;
   createdAt?: string | Date;
+  recorrenciaInfo?: RecorrenciaInfo | null;
+  textoObservacao?: string;
+}
+
+export function extrairMetadadosConta(observacao: string | null | undefined): {
+  recorrenciaInfo: RecorrenciaInfo | null;
+  textoObservacao: string;
+} {
+  if (!observacao) {
+    return { recorrenciaInfo: null, textoObservacao: "" };
+  }
+
+  // Tentar parse como JSON estruturado
+  try {
+    if (observacao.startsWith("{") && observacao.endsWith("}")) {
+      const parsed = JSON.parse(observacao);
+      if (parsed && typeof parsed === "object" && parsed.recorrenciaId) {
+        return {
+          recorrenciaInfo: {
+            recorrenciaId: String(parsed.recorrenciaId),
+            tipo: parsed.tipo === "CONTINUO" ? "CONTINUO" : "PARCELADO",
+            parcelaAtual: typeof parsed.parcelaAtual === "number" ? parsed.parcelaAtual : undefined,
+            totalParcelas: typeof parsed.totalParcelas === "number" ? parsed.totalParcelas : undefined,
+          },
+          textoObservacao: typeof parsed.texto === "string" ? parsed.texto : "",
+        };
+      }
+    }
+  } catch {
+    // Se falhar o parse JSON, prossegue com texto normal
+  }
+
+  // Tag fallback legada [REC:id:tipo:atual/total]
+  const matchTag = observacao.match(/\[REC:([^:]+):([A-Z]+)(?::(\d+)\/(\d+))?\]/);
+  if (matchTag) {
+    const [, recorrenciaId, tipo, pAtual, pTotal] = matchTag;
+    const textoLimpo = observacao.replace(matchTag[0], "").trim();
+    return {
+      recorrenciaInfo: {
+        recorrenciaId,
+        tipo: tipo === "CONTINUO" ? "CONTINUO" : "PARCELADO",
+        parcelaAtual: pAtual ? Number(pAtual) : undefined,
+        totalParcelas: pTotal ? Number(pTotal) : undefined,
+      },
+      textoObservacao: textoLimpo,
+    };
+  }
+
+  return { recorrenciaInfo: null, textoObservacao: observacao };
+}
+
+export function codificarObservacao(
+  texto: string | null | undefined,
+  recorrencia?: RecorrenciaInfo | null
+): string | null {
+  const textoLimpo = texto?.trim() || "";
+  if (!recorrencia) {
+    return textoLimpo || null;
+  }
+  return JSON.stringify({
+    recorrenciaId: recorrencia.recorrenciaId,
+    tipo: recorrencia.tipo,
+    parcelaAtual: recorrencia.parcelaAtual,
+    totalParcelas: recorrencia.totalParcelas,
+    texto: textoLimpo,
+  });
 }
 
 export const UNIDADES_PADRAO: UnidadeAdm[] = [
@@ -147,6 +220,8 @@ export async function buscarContasPagar(): Promise<ContaPagarAdm[]> {
           nome: "Unidade",
         };
 
+      const { recorrenciaInfo, textoObservacao } = extrairMetadadosConta(item.observacao);
+
       return {
         ...item,
         dataPagamento: item.dataPagamento || null,
@@ -154,6 +229,8 @@ export async function buscarContasPagar(): Promise<ContaPagarAdm[]> {
         valor: Number(item.valor) || 0,
         descricao: item.descricao || null,
         observacao: item.observacao || null,
+        recorrenciaInfo,
+        textoObservacao,
       };
     }) as ContaPagarAdm[];
   } catch (err) {
